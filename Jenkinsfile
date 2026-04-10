@@ -4,7 +4,6 @@ pipeline {
   environment {
     IMAGE_NAME = "p2p-chat"
     IMAGE_TAG = "${env.GIT_COMMIT}"
-    REGISTRY = "ghcr.io"
   }
 
   stages {
@@ -30,28 +29,28 @@ pipeline {
 
     stage('Push Docker Image') {
       when {
-        expression { return env.GHCR_CREDENTIALS_ID != null && env.GITHUB_OWNER != null }
+        expression { return env.ACR_CREDENTIALS_ID != null && env.ACR_LOGIN_SERVER != null }
       }
       steps {
-        withCredentials([usernamePassword(credentialsId: env.GHCR_CREDENTIALS_ID, usernameVariable: 'GHCR_USER', passwordVariable: 'GHCR_TOKEN')]) {
-          sh 'echo ${GHCR_TOKEN} | docker login ghcr.io -u ${GHCR_USER} --password-stdin'
-          sh 'docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${GITHUB_OWNER}/${IMAGE_NAME}:${IMAGE_TAG}'
-          sh 'docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY}/${GITHUB_OWNER}/${IMAGE_NAME}:latest'
-          sh 'docker push ${REGISTRY}/${GITHUB_OWNER}/${IMAGE_NAME}:${IMAGE_TAG}'
-          sh 'docker push ${REGISTRY}/${GITHUB_OWNER}/${IMAGE_NAME}:latest'
+        withCredentials([usernamePassword(credentialsId: env.ACR_CREDENTIALS_ID, usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+          sh 'echo ${ACR_PASS} | docker login ${ACR_LOGIN_SERVER} -u ${ACR_USER} --password-stdin'
+          sh 'docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}'
+          sh 'docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest'
+          sh 'docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}'
+          sh 'docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest'
         }
       }
     }
 
     stage('Deploy to Kubernetes') {
       when {
-        expression { return env.KUBE_CONFIG_CREDENTIALS_ID != null && env.GITHUB_OWNER != null }
+        expression { return env.KUBE_CONFIG_CREDENTIALS_ID != null && env.ACR_LOGIN_SERVER != null }
       }
       steps {
         withCredentials([file(credentialsId: env.KUBE_CONFIG_CREDENTIALS_ID, variable: 'KUBECONFIG_FILE')]) {
           sh 'mkdir -p $HOME/.kube'
           sh 'cp ${KUBECONFIG_FILE} $HOME/.kube/config'
-          sh 'IMAGE_URI=${REGISTRY}/${GITHUB_OWNER}/${IMAGE_NAME}:${IMAGE_TAG}; sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml > /tmp/deployment.yaml'
+          sh 'IMAGE_URI=${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}; sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml > /tmp/deployment.yaml'
           sh 'kubectl apply -f k8s/namespace.yaml'
           sh 'kubectl apply -f k8s/configmap.yaml'
           sh 'kubectl apply -f /tmp/deployment.yaml'

@@ -13,8 +13,8 @@ This repository originally focused on distributed systems features. This documen
 - Configuration and deployment automation with Ansible in ansible/
 
 ## Final decisions used in this project
-- Registry choice: GitHub Container Registry (GHCR)
-- Final image name: ghcr.io/<your-github-owner>/p2p-chat
+- Registry choice: Azure Container Registry (ACR)
+- Final image name: <acr-login-server>/p2p-chat
 - CI/CD engines: GitHub Actions and Jenkins
 - Monitoring: Azure Monitor (via AKS + Log Analytics integration)
 
@@ -66,18 +66,20 @@ Create these repository secrets before AKS deployment:
 - AZURE_CREDENTIALS
 - AKS_RESOURCE_GROUP
 - AKS_CLUSTER_NAME
+- ACR_NAME
+- ACR_LOGIN_SERVER
 
 Notes:
 - ci-cd workflow builds and pushes:
-	- ghcr.io/<owner>/p2p-chat:<git-sha>
-	- ghcr.io/<owner>/p2p-chat:latest
+	- <acr-login-server>/p2p-chat:<git-sha>
+	- <acr-login-server>/p2p-chat:latest
 - Deployment step auto-injects the exact SHA image into Kubernetes deployment.
 - Use provision-aks workflow to create AKS first when cluster does not exist.
 
 ## Jenkins setup
 Set these Jenkins environment values or credentials:
-- GHCR_CREDENTIALS_ID
-- GITHUB_OWNER
+- ACR_CREDENTIALS_ID
+- ACR_LOGIN_SERVER
 - KUBE_CONFIG_CREDENTIALS_ID
 
 ## Terraform workflow

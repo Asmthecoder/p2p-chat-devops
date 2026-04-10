@@ -43,6 +43,7 @@ jobs:
         run: |
           echo "AKS_RESOURCE_GROUP=$(terraform output -raw resource_group_name)" >> $GITHUB_ENV
           echo "AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)" >> $GITHUB_ENV
+          echo "ACR_NAME=$(terraform output -raw acr_name)" >> $GITHUB_ENV
           echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
           echo "LOG_ANALYTICS_WORKSPACE_NAME=$(terraform output -raw log_analytics_workspace_name)" >> $GITHUB_ENV
 
@@ -51,4 +52,6 @@ jobs:
           echo "Set these GitHub repository secrets for ci-cd workflow:"
           echo "AKS_RESOURCE_GROUP=${AKS_RESOURCE_GROUP}"
           echo "AKS_CLUSTER_NAME=${AKS_CLUSTER_NAME}"
+          echo "ACR_NAME=${ACR_NAME}"
+          echo "ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}"
           echo "Azure Monitor workspace: ${LOG_ANALYTICS_WORKSPACE_NAME}"
