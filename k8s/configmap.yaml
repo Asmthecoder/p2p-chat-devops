@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: p2p-chat-config
+  namespace: p2p-chat
+data:
+  UI_HOST: "0.0.0.0"
+  UI_PORT: "17001"
+  APP_PORT: "9001"
+  APP_USERNAME: "AksPeer"

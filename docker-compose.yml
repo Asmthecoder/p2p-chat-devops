@@ -1,0 +1,13 @@
+version: '3.9'
+services:
+  p2p-chat:
+    build: .
+    container_name: p2p-chat
+    ports:
+      - "17001:17001"
+      - "9001:9001"
+      - "9999:9999/udp"
+    environment:
+      - UI_HOST=0.0.0.0
+      - UI_PORT=17001
+    command: ["python", "main.py", "--port", "9001", "--username", "ComposePeer"]

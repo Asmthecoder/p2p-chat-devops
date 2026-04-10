@@ -1,0 +1,60 @@
+---
+- name: Configure deployment host and deploy P2P chat manifests
+  hosts: k8s_control
+  become: true
+  vars:
+    app_namespace: p2p-chat
+    app_repo_path: /opt/p2p-chat
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - unzip
+          - git
+        update_cache: true
+
+    - name: Ensure kubectl is installed
+      shell: |
+        if ! command -v kubectl >/dev/null 2>&1; then
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          rm -f kubectl
+        fi
+      args:
+        creates: /usr/local/bin/kubectl
+
+    - name: Ensure app directory exists
+      file:
+        path: "{{ app_repo_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync repository to deployment host
+      synchronize:
+        src: "../"
+        dest: "{{ app_repo_path }}"
+        delete: false
+
+    - name: Deploy namespace
+      command: kubectl apply -f {{ app_repo_path }}/k8s/namespace.yaml
+
+    - name: Deploy configmap
+      command: kubectl apply -f {{ app_repo_path }}/k8s/configmap.yaml
+
+    - name: Deploy application
+      command: kubectl apply -f {{ app_repo_path }}/k8s/deployment.yaml
+
+    - name: Deploy service
+      command: kubectl apply -f {{ app_repo_path }}/k8s/service.yaml
+
+    - name: Deploy autoscaler
+      command: kubectl apply -f {{ app_repo_path }}/k8s/hpa.yaml
+
+    - name: Verify pods are running
+      command: kubectl get pods -n {{ app_namespace }}
+      register: pod_status
+
+    - name: Show pod status
+      debug:
+        var: pod_status.stdout_lines

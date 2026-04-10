@@ -1,0 +1,54 @@
+name: provision-aks
+
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: Resource prefix
+        required: true
+        default: p2pchat
+      location:
+        description: Azure location
+        required: true
+        default: Central India
+
+jobs:
+  terraform-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: infra/terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="prefix=${{ github.event.inputs.prefix }}" \
+            -var="location=${{ github.event.inputs.location }}"
+
+      - name: Capture AKS outputs
+        working-directory: infra/terraform
+        run: |
+          echo "AKS_RESOURCE_GROUP=$(terraform output -raw resource_group_name)" >> $GITHUB_ENV
+          echo "AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)" >> $GITHUB_ENV
+          echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
+          echo "LOG_ANALYTICS_WORKSPACE_NAME=$(terraform output -raw log_analytics_workspace_name)" >> $GITHUB_ENV
+
+      - name: Show next step
+        run: |
+          echo "Set these GitHub repository secrets for ci-cd workflow:"
+          echo "AKS_RESOURCE_GROUP=${AKS_RESOURCE_GROUP}"
+          echo "AKS_CLUSTER_NAME=${AKS_CLUSTER_NAME}"
+          echo "Azure Monitor workspace: ${LOG_ANALYTICS_WORKSPACE_NAME}"

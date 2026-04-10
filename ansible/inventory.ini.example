@@ -1,0 +1,5 @@
+[k8s_control]
+aks-admin-host ansible_host=20.0.0.10 ansible_user=azureuser
+
+[k8s_control:vars]
+ansible_python_interpreter=/usr/bin/python3

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.db-shm
+*.db-wal
+.nicegui/
+.git/
+.github/
+.env
+.venv/
+venv/
+*.log

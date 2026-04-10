@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Runtime and local data
+.nicegui/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Local config/secrets
+config.json
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
