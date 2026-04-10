@@ -9,6 +9,9 @@ Problem-definition assessment appendix:
 Architecture and design assessment appendix:
 - DISTRIBUTED_ARCHITECTURE_AND_DESIGN.md
 
+Process/communication assessment appendix:
+- PROCESS_COMMUNICATION_COORDINATION.md
+
 ## Toolchain Used
 - Git and GitHub
 - GitHub Actions and Jenkins

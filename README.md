@@ -145,6 +145,9 @@ Message types: `MESSAGE`, `HEARTBEAT`, `SYSTEM`
 
 ## 3. Process, Communication & Coordination
 
+Detailed process/communication appendix for assessment:
+- PROCESS_COMMUNICATION_COORDINATION.md
+
 ### Inter-Process Communication
 - **TCP sockets** (asyncio StreamReader/StreamWriter): reliable, ordered, bidirectional
 - **UDP sockets** (broadcast): connectionless, used only for discovery beacons
