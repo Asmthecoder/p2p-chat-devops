@@ -21,6 +21,12 @@ pipeline {
       }
     }
 
+    stage('Runtime Smoke Test') {
+      steps {
+        sh 'PYTHONPATH=. python eval/smoke_p2p.py'
+      }
+    }
+
     stage('Build Docker Image') {
       steps {
         sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .'
@@ -56,6 +62,7 @@ pipeline {
           sh 'kubectl apply -f /tmp/deployment.yaml'
           sh 'kubectl apply -f k8s/service.yaml'
           sh 'kubectl apply -f k8s/hpa.yaml'
+          sh 'kubectl wait --for=condition=available deployment/p2p-chat -n p2p-chat --timeout=180s'
           sh 'kubectl rollout status deployment/p2p-chat -n p2p-chat --timeout=180s'
           sh 'kubectl get pods -n p2p-chat -o wide'
           sh 'kubectl get svc -n p2p-chat'

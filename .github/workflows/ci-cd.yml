@@ -27,6 +27,10 @@ jobs:
         run: |
           python -m py_compile main.py peer.py ui.py message_store.py encryption.py
 
+      - name: Runtime smoke test (2-peer integration)
+        run: |
+          PYTHONPATH=. python eval/smoke_p2p.py
+
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
@@ -83,6 +87,7 @@ jobs:
           kubectl apply -f /tmp/deployment.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/hpa.yaml
+          kubectl wait --for=condition=available deployment/p2p-chat -n p2p-chat --timeout=180s
           kubectl rollout status deployment/p2p-chat -n p2p-chat --timeout=180s
           kubectl get pods -n p2p-chat -o wide
           kubectl get svc -n p2p-chat
