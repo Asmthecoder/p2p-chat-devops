@@ -3,6 +3,7 @@ services:
   p2p-chat:
     build: .
     container_name: p2p-chat
+    restart: unless-stopped
     ports:
       - "17001:17001"
       - "9001:9001"
@@ -10,4 +11,9 @@ services:
     environment:
       - UI_HOST=0.0.0.0
       - UI_PORT=17001
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:17001', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     command: ["python", "main.py", "--port", "9001", "--username", "ComposePeer"]

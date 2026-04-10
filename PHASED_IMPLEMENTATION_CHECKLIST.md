@@ -17,15 +17,21 @@ Evidence files:
 Status: Implemented
 - Dockerfile added.
 - docker-compose added for local run.
+- Docker health checks added.
 - CI/CD pushes container image to ACR.
+- Kubernetes orchestration manifests and deployment script included.
 
 Commands:
 - docker build -t p2p-chat:local .
 - docker run --rm -p 17001:17001 -p 9001:9001 -p 9999:9999/udp p2p-chat:local
+- docker inspect --format='{{json .State.Health}}' <container-id>
+- ./scripts/deploy_k8s.ps1 -Image <acr-login-server>/p2p-chat:<tag>
 
 Evidence files:
 - Dockerfile
 - docker-compose.yml
+- scripts/deploy_k8s.ps1
+- k8s/deployment.yaml
 - .github/workflows/ci-cd.yml
 
 ## Phase 3 Infrastructure Provisioning IaC
