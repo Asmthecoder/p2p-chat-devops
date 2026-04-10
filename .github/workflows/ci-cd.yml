@@ -30,7 +30,7 @@ jobs:
   build-and-push:
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && secrets.AZURE_CREDENTIALS != '' && secrets.ACR_NAME != '' && secrets.ACR_LOGIN_SERVER != ''
+    if: github.event_name == 'push'
     permissions:
       contents: read
       id-token: write
@@ -58,7 +58,7 @@ jobs:
   deploy-aks:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && secrets.AZURE_CREDENTIALS != '' && secrets.AKS_RESOURCE_GROUP != '' && secrets.AKS_CLUSTER_NAME != '' && secrets.ACR_LOGIN_SERVER != ''
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,3 +84,5 @@ jobs:
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/hpa.yaml
           kubectl rollout status deployment/p2p-chat -n p2p-chat --timeout=180s
+          kubectl get pods -n p2p-chat -o wide
+          kubectl get svc -n p2p-chat

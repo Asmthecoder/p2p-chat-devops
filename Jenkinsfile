@@ -57,6 +57,8 @@ pipeline {
           sh 'kubectl apply -f k8s/service.yaml'
           sh 'kubectl apply -f k8s/hpa.yaml'
           sh 'kubectl rollout status deployment/p2p-chat -n p2p-chat --timeout=180s'
+          sh 'kubectl get pods -n p2p-chat -o wide'
+          sh 'kubectl get svc -n p2p-chat'
         }
       }
     }
