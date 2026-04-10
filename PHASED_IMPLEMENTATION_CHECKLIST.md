@@ -41,20 +41,28 @@ Terraform provisions:
 - ACR
 - AKS
 - Log Analytics Workspace for Azure Monitor
+- Provisioning and teardown scripts for reproducible runs
+- CI IaC validation workflow for Terraform and Ansible syntax
 
 Commands:
 - terraform init
 - terraform apply
+- ./scripts/provision_infra.ps1 -AutoApprove
+- ./scripts/destroy_infra.ps1 -AutoApprove
 
 Evidence files:
 - infra/terraform/main.tf
 - infra/terraform/variables.tf
 - infra/terraform/outputs.tf
+- scripts/provision_infra.ps1
+- scripts/destroy_infra.ps1
+- .github/workflows/iac-validate.yml
 
 ## Phase 4 Configuration Management
 Status: Implemented
 - Ansible playbook deploys Kubernetes manifests.
 - Automates kubectl apply for namespace, configmap, deployment, service, hpa.
+- Renders deployment image dynamically and verifies pod/service outputs.
 
 Command:
 - ansible-playbook -i ansible/inventory.ini ansible/site.yml
@@ -63,6 +71,7 @@ Evidence files:
 - ansible/site.yml
 - k8s/deployment.yaml
 - k8s/service.yaml
+- IAC_AUTOMATION.md
 
 ## Phase 5 CI/CD Pipeline Setup
 Status: Implemented

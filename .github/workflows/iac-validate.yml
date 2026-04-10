@@ -1,0 +1,51 @@
+name: iac-validate
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "infra/terraform/**"
+      - "ansible/**"
+      - ".github/workflows/iac-validate.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "infra/terraform/**"
+      - "ansible/**"
+      - ".github/workflows/iac-validate.yml"
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  ansible-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible-core
+
+      - name: Ansible syntax check
+        run: ansible-playbook --syntax-check -i ansible/inventory.ini.example ansible/site.yml

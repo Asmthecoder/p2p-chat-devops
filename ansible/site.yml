@@ -5,6 +5,8 @@
   vars:
     app_namespace: p2p-chat
     app_repo_path: /opt/p2p-chat
+    app_image: "example.azurecr.io/p2p-chat:latest"
+    rendered_deployment_path: "/tmp/p2p-chat-deployment.yaml"
   tasks:
     - name: Install required packages
       apt:
@@ -42,8 +44,12 @@
     - name: Deploy configmap
       command: kubectl apply -f {{ app_repo_path }}/k8s/configmap.yaml
 
+    - name: Render deployment manifest with concrete image
+      shell: |
+        sed "s|IMAGE_PLACEHOLDER|{{ app_image }}|g" {{ app_repo_path }}/k8s/deployment.yaml > {{ rendered_deployment_path }}
+
     - name: Deploy application
-      command: kubectl apply -f {{ app_repo_path }}/k8s/deployment.yaml
+      command: kubectl apply -f {{ rendered_deployment_path }}
 
     - name: Deploy service
       command: kubectl apply -f {{ app_repo_path }}/k8s/service.yaml
@@ -51,10 +57,21 @@
     - name: Deploy autoscaler
       command: kubectl apply -f {{ app_repo_path }}/k8s/hpa.yaml
 
+    - name: Wait for deployment availability
+      command: kubectl wait --for=condition=available deployment/p2p-chat -n {{ app_namespace }} --timeout=180s
+
     - name: Verify pods are running
-      command: kubectl get pods -n {{ app_namespace }}
+      command: kubectl get pods -n {{ app_namespace }} -o wide
       register: pod_status
+
+    - name: Verify services
+      command: kubectl get svc -n {{ app_namespace }}
+      register: svc_status
 
     - name: Show pod status
       debug:
         var: pod_status.stdout_lines
+
+    - name: Show service status
+      debug:
+        var: svc_status.stdout_lines
