@@ -6,6 +6,9 @@ This project implements an end-to-end DevOps pipeline for a Python web-based P2P
 Problem-definition assessment appendix:
 - PROBLEM_DEFINITION_AND_OBJECTIVES.md
 
+Architecture and design assessment appendix:
+- DISTRIBUTED_ARCHITECTURE_AND_DESIGN.md
+
 ## Toolchain Used
 - Git and GitHub
 - GitHub Actions and Jenkins

@@ -102,6 +102,7 @@ Submission artifacts:
 - README.md
 - DEVOPS_PIPELINE.md
 - AZURE_MONITOR_SETUP.md
+- DISTRIBUTED_ARCHITECTURE_AND_DESIGN.md
 - This checklist
 
 ## Suggested screenshot checklist

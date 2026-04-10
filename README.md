@@ -85,6 +85,9 @@ This project implements a **Peer-to-Peer (P2P) chat application** where:
 
 ## 2. Architecture & Design
 
+Detailed architecture appendix for assessment:
+- DISTRIBUTED_ARCHITECTURE_AND_DESIGN.md
+
 ### System Architecture
 
 ```
