@@ -25,6 +25,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
   resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = "${var.prefix}-dns"
   kubernetes_version  = var.kubernetes_version
+  sku_tier            = "Free"
+  support_plan        = "KubernetesOfficial"
 
   default_node_pool {
     name       = "system"

@@ -11,6 +11,10 @@ on:
         description: Azure location
         required: true
         default: Central India
+      kubernetes_version:
+        description: AKS Kubernetes version
+        required: true
+        default: "1.34.4"
 
 jobs:
   terraform-apply:
@@ -36,7 +40,8 @@ jobs:
         run: |
           terraform apply -auto-approve \
             -var="prefix=${{ github.event.inputs.prefix }}" \
-            -var="location=${{ github.event.inputs.location }}"
+            -var="location=${{ github.event.inputs.location }}" \
+            -var="kubernetes_version=${{ github.event.inputs.kubernetes_version }}"
 
       - name: Capture AKS outputs
         working-directory: infra/terraform
