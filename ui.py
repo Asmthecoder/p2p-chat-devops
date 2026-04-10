@@ -745,12 +745,14 @@ def _build_settings_dialog(config):
         ui.label("Node Configuration").style("font-size:1.1rem; font-weight:700; margin-bottom:10px;")
         uname = ui.input("Node Display Name", value=config.get("username")).props("outlined dense").style("width:100%; margin-bottom:10px;")
         pt = ui.input("TCP Networking Listen Port", value=str(config.get("port"))).props("outlined dense").style("width:100%; margin-bottom:6px;")
+        enc = ui.switch("Enable Encryption", value=bool(config.get("encryption_enabled", True))).style("margin-bottom:10px;")
         ui.label("Note: Port changes require an application restart.").style("font-size:0.8rem; color:var(--text-secondary); margin-bottom:20px;")
         
         def save():
             import json, os
             config["username"] = uname.value.strip()
             config["port"] = int(pt.value.strip())
+            config["encryption_enabled"] = bool(enc.value)
             with open(os.path.join(os.path.dirname(__file__), "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
             ui.notify("Configuration saved locally. Restart node script to bind.", type="positive")

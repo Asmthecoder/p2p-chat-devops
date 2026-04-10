@@ -378,6 +378,9 @@ class PeerManager:
                 return
 
             if msg_type == "TYPING":
+                msg["peer_id"] = pid
+                if pid in self._peers:
+                    msg["sender"] = self._peers[pid].get("username", msg.get("sender", "Unknown"))
                 await self.inbound_queue.put(msg)
                 return
 
@@ -388,7 +391,9 @@ class PeerManager:
                 except Exception as dec_exc:
                     logger.error("Failed to decrypt message from %s: %s", pid, dec_exc)
                     msg["content"] = "[Message decryption failed]"
-                
+
+                # Normalize sender identity for UI/state mapping.
+                msg["peer_id"] = pid
                 # Use the sender's actual username from peers table if available
                 if pid in self._peers:
                     msg["sender"] = self._peers[pid]["username"]
@@ -404,6 +409,7 @@ class PeerManager:
                             self._peers[pid]["username"]  = msg.get("sender", "Unknown")
                             self._peers[pid]["meta_port"] = msg.get("meta_port", self._peers[pid]["port"])
                 else:
+                    msg["peer_id"] = pid
                     await self.inbound_queue.put(msg)
         except Exception as exc:
             logger.error("Error dispatching message from %s: %s", pid, exc, exc_info=True)
