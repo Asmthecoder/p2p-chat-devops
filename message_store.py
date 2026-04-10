@@ -15,7 +15,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,7 @@ class MessageStore:
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS messages (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id  TEXT,
                 peer_id     TEXT NOT NULL,
                 direction   TEXT NOT NULL CHECK(direction IN ('in','out')),
                 content     TEXT NOT NULL,
@@ -66,8 +66,22 @@ class MessageStore:
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_peer ON messages(peer_id, timestamp);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id) WHERE message_id IS NOT NULL;
         """)
+        await self._ensure_message_id_column()
         await self._db.commit()
+
+    async def _ensure_message_id_column(self):
+        """Migration helper for older databases created before message_id was introduced."""
+        async with self._db.execute("PRAGMA table_info(messages)") as cursor:
+            cols = await cursor.fetchall()
+        existing_cols = {row[1] for row in cols}
+        if "message_id" not in existing_cols:
+            await self._db.execute("ALTER TABLE messages ADD COLUMN message_id TEXT")
+            await self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id) WHERE message_id IS NOT NULL"
+            )
+            await self._db.commit()
 
     # ──────────────────────────── Messages ────────────────────────────
 
@@ -77,6 +91,8 @@ class MessageStore:
         direction: str,
         content: str,
         is_broadcast: bool = False,
+        message_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> Dict:
         """
         Persist a chat message.
@@ -88,20 +104,33 @@ class MessageStore:
         content   : *decrypted* plaintext content to store
         is_broadcast : True if this was a broadcast to all peers
         """
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
         async with self._lock:
-            await self._db.execute(
-                """INSERT INTO messages (peer_id, direction, content, timestamp, is_broadcast)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (peer_id, direction, content, ts, int(is_broadcast)),
-            )
+            if message_id:
+                await self._db.execute(
+                    """INSERT OR IGNORE INTO messages (message_id, peer_id, direction, content, timestamp, is_broadcast)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (message_id, peer_id, direction, content, ts, int(is_broadcast)),
+                )
+            else:
+                await self._db.execute(
+                    """INSERT INTO messages (peer_id, direction, content, timestamp, is_broadcast)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (peer_id, direction, content, ts, int(is_broadcast)),
+                )
             await self._db.commit()
-        return {"peer_id": peer_id, "direction": direction, "content": content, "timestamp": ts}
+        return {
+            "message_id": message_id,
+            "peer_id": peer_id,
+            "direction": direction,
+            "content": content,
+            "timestamp": ts,
+        }
 
     async def get_history(self, peer_id: str, limit: int = 50) -> List[Dict]:
         """Fetch the last `limit` messages for a given peer_id."""
         async with self._db.execute(
-            """SELECT peer_id, direction, content, timestamp, is_broadcast
+            """SELECT message_id, peer_id, direction, content, timestamp, is_broadcast
                FROM messages
                WHERE peer_id = ?
                ORDER BY timestamp DESC
@@ -114,7 +143,7 @@ class MessageStore:
     async def get_all_messages(self, limit: int = 200) -> List[Dict]:
         """Fetch recent messages from all peers (for the broadcast/global view)."""
         async with self._db.execute(
-            """SELECT peer_id, direction, content, timestamp, is_broadcast
+            """SELECT message_id, peer_id, direction, content, timestamp, is_broadcast
                FROM messages
                ORDER BY timestamp DESC
                LIMIT ?""",
@@ -122,6 +151,15 @@ class MessageStore:
         ) as cursor:
             rows = await cursor.fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    async def has_message_id(self, message_id: str) -> bool:
+        if not message_id:
+            return False
+        async with self._db.execute(
+            "SELECT 1 FROM messages WHERE message_id = ? LIMIT 1", (message_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row is not None
 
     # ──────────────────────────── Peers ───────────────────────────────
 

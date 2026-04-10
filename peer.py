@@ -20,6 +20,7 @@ import logging
 import socket
 import struct
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Callable, Dict, Optional, Set
 
@@ -177,6 +178,8 @@ class PeerManager:
         self._writers: Dict[str, asyncio.StreamWriter] = {}
         # peer_id → {username, host, port, last_heartbeat, missed_beats, online}
         self._peers:   Dict[str, dict] = {}
+        # Direct messages queued while peer is offline: peer_id -> [message_dict]
+        self._pending_direct: Dict[str, list] = {}
         self._lock = asyncio.Lock()
 
         # Debounce: peer_id → (last_event_time, last_event_type)
@@ -220,14 +223,17 @@ class PeerManager:
         await self.store.close()
 
     async def send_message(self, content: str, target_peer_id: Optional[str] = None):
+        ts           = _now_iso()
+        message_id   = str(uuid.uuid4())
         encrypted    = self.crypto.encrypt(content)
         is_broadcast = target_peer_id is None
         msg = {
             "type":         "MESSAGE",
+            "message_id":   message_id,
             "sender":       self.username,
             "peer_id":      self.peer_id,
             "content":      encrypted,
-            "timestamp":    _now_iso(),
+            "timestamp":    ts,
             "is_broadcast": int(is_broadcast),
         }
         
@@ -245,10 +251,23 @@ class PeerManager:
                     sent_count += 1
                 except Exception as exc:
                     logger.warning("Failed to send to %s: %s", pid, exc)
+                    if not is_broadcast and target_peer_id == pid:
+                        self._pending_direct.setdefault(pid, []).append(msg)
                     await self._on_peer_disconnected(pid)
 
+        if not is_broadcast and target_peer_id and sent_count == 0:
+            self._pending_direct.setdefault(target_peer_id, []).append(msg)
+            logger.info("Queued direct message for %s (offline)", target_peer_id)
+
         store_pid = "broadcast" if is_broadcast else target_peer_id
-        await self.store.save_message(store_pid, "out", content, is_broadcast)
+        await self.store.save_message(
+            store_pid,
+            "out",
+            content,
+            is_broadcast,
+            message_id=message_id,
+            timestamp=ts,
+        )
 
     async def send_typing(self, target_peer_id: Optional[str] = None):
         """Send a transient TYPING event to peer(s)."""
@@ -355,6 +374,17 @@ class PeerManager:
 
         # Emit system message (with debounce)
         self._emit_system(pid, username, "joined")
+
+        # Flush queued direct messages for this peer after reconnection.
+        pending = self._pending_direct.pop(pid, [])
+        for queued in pending:
+            try:
+                await _send_message(writer, queued)
+            except Exception as exc:
+                logger.warning("Failed to flush queued message to %s: %s", pid, exc)
+                self._pending_direct.setdefault(pid, []).append(queued)
+                break
+
         self._spawn(self._read_loop(pid, reader))
 
     async def _read_loop(self, pid: str, reader):
@@ -385,6 +415,9 @@ class PeerManager:
                 return
 
             if msg_type == "MESSAGE":
+                msg_id = msg.get("message_id", "")
+                if msg_id and await self.store.has_message_id(msg_id):
+                    return
                 try:
                     decrypted      = self.crypto.decrypt(msg.get("content", ""))
                     msg["content"] = decrypted
@@ -397,7 +430,14 @@ class PeerManager:
                 # Use the sender's actual username from peers table if available
                 if pid in self._peers:
                     msg["sender"] = self._peers[pid]["username"]
-                await self.store.save_message(pid, "in", msg.get("content", ""), msg.get("is_broadcast", False))
+                await self.store.save_message(
+                    pid,
+                    "in",
+                    msg.get("content", ""),
+                    msg.get("is_broadcast", False),
+                    message_id=msg_id or None,
+                    timestamp=msg.get("timestamp"),
+                )
                 await self.inbound_queue.put(msg)
                 return
 
@@ -487,4 +527,15 @@ class PeerManager:
 
             for pid in dead:
                 logger.warning("Heartbeat timeout — removing peer %s", pid)
+                await self._on_peer_disconnected(pid)
+
+            # Detect stale peers that are writable but not responding.
+            now = time.monotonic()
+            stale = []
+            async with self._lock:
+                for pid, info in self._peers.items():
+                    if pid in self._writers and (now - info.get("last_heartbeat", now)) > HEARTBEAT_TIMEOUT:
+                        stale.append(pid)
+            for pid in stale:
+                logger.warning("Peer %s exceeded heartbeat timeout window", pid)
                 await self._on_peer_disconnected(pid)
