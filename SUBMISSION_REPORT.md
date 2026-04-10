@@ -3,6 +3,9 @@
 ## Project Overview
 This project implements an end-to-end DevOps pipeline for a Python web-based P2P chat application, including source control, containerization, IaC, configuration management, CI/CD, AKS deployment, and monitoring.
 
+Problem-definition assessment appendix:
+- PROBLEM_DEFINITION_AND_OBJECTIVES.md
+
 ## Toolchain Used
 - Git and GitHub
 - GitHub Actions and Jenkins

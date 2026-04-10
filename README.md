@@ -28,6 +28,18 @@ Traditional chat systems rely on a **central server** that routes all messages. 
 - **Scalability bottlenecks** — the server becomes a throughput constraint.
 - **Privacy concerns** — all messages pass through a third party.
 
+### System Requirements (Mapped from Problem)
+| Requirement ID | Requirement | Why it is needed |
+|---|---|---|
+| R1 | No central coordinator for message routing | Removes single point of failure |
+| R2 | Direct peer-to-peer communication over LAN/IP | Enables decentralization and lower dependency |
+| R3 | Concurrent message processing | Supports multi-peer real-time chat |
+| R4 | Local durable message persistence | Preserves history and supports recovery |
+| R5 | Peer discovery and liveness tracking | Keeps network membership accurate |
+| R6 | Secure payload transport | Protects privacy and integrity |
+| R7 | Recover from disconnects automatically | Improves fault tolerance and usability |
+| R8 | Quantifiable performance validation | Demonstrates system effectiveness |
+
 ### Objectives
 This project implements a **Peer-to-Peer (P2P) chat application** where:
 - **CO1**: Eliminate the central server — each peer communicates directly with others.
@@ -36,6 +48,30 @@ This project implements a **Peer-to-Peer (P2P) chat application** where:
 - **CO4**: Handle faults gracefully — detect peer failure via heartbeats and reconnect automatically.
 - **CO5**: Protect data in transit — AES-256-GCM encryption for all message payloads.
 - **CO6**: Evaluate performance — measure latency vs. peer count; compare against centralized approach.
+
+### Objective-to-Requirement Traceability
+| Objective | Mapped Requirements | Verification Method |
+|---|---|---|
+| CO1 (No central server) | R1, R2 | Architecture review + multi-peer execution without server |
+| CO2 (Concurrency) | R3 | Async task model inspection + parallel message tests |
+| CO3 (Consistency) | R4 | Database history checks across peers |
+| CO4 (Fault tolerance) | R5, R7 | Heartbeat timeout + reconnect behavior tests |
+| CO5 (Security) | R6 | Encrypted transport/decryption behavior validation |
+| CO6 (Performance) | R8 | Latency benchmark script and reported metrics |
+
+### Scope and Assumptions
+- Scope: LAN/IP P2P chat between trusted peers with optional manual peer entry.
+- Scope: Message persistence and availability-focused behavior, not financial-grade consensus.
+- Assumption: Peers share compatible configuration and encryption keys when encryption is enabled.
+- Assumption: Firewall/network settings permit configured TCP/UDP ports.
+
+### Acceptance Criteria
+- AC1: A node can chat without any centralized application server.
+- AC2: Broadcast messages reach all connected peers and direct messages reach only selected peer.
+- AC3: Message history is persisted locally and reloads on conversation switch/restart.
+- AC4: Offline peers are detected and status is updated; reconnect attempts occur automatically.
+- AC5: Encrypted payload handling succeeds for matching keys and degrades safely for mismatches.
+- AC6: Performance evaluation script produces measurable latency output and results artifact.
 
 ### Why P2P over Client-Server?
 | Aspect | Client-Server | P2P (this project) |
