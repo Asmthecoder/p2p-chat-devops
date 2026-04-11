@@ -7,17 +7,17 @@ output "aks_cluster_name" {
 }
 
 output "acr_login_server" {
-  value = azurerm_container_registry.acr.login_server
+  value = local.acr_login_server
 }
 
 output "acr_name" {
-  value = azurerm_container_registry.acr.name
+  value = local.acr_name
 }
 
 output "log_analytics_workspace_name" {
-  value = azurerm_log_analytics_workspace.law.name
+  value = local.law_name
 }
 
 output "log_analytics_workspace_id" {
-  value = azurerm_log_analytics_workspace.law.id
+  value = local.law_id
 }

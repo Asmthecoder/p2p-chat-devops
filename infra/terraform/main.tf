@@ -12,9 +12,14 @@ data "azurerm_resource_group" "existing_rg" {
 locals {
   resource_group_name     = var.create_resource_group ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.existing_rg[0].name
   resource_group_location = var.create_resource_group ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.existing_rg[0].location
+  acr_name                = var.create_resource_group ? azurerm_container_registry.acr[0].name : data.azurerm_container_registry.acr[0].name
+  acr_login_server        = var.create_resource_group ? azurerm_container_registry.acr[0].login_server : data.azurerm_container_registry.acr[0].login_server
+  law_name                = var.create_resource_group ? azurerm_log_analytics_workspace.law[0].name : data.azurerm_log_analytics_workspace.law[0].name
+  law_id                  = var.create_resource_group ? azurerm_log_analytics_workspace.law[0].id : data.azurerm_log_analytics_workspace.law[0].id
 }
 
 resource "azurerm_container_registry" "acr" {
+  count               = var.create_resource_group ? 1 : 0
   name                = replace("${var.prefix}acr", "-", "")
   resource_group_name = local.resource_group_name
   location            = local.resource_group_location
@@ -22,12 +27,25 @@ resource "azurerm_container_registry" "acr" {
   admin_enabled       = false
 }
 
+data "azurerm_container_registry" "acr" {
+  count               = var.create_resource_group ? 0 : 1
+  name                = replace("${var.prefix}acr", "-", "")
+  resource_group_name = local.resource_group_name
+}
+
 resource "azurerm_log_analytics_workspace" "law" {
+  count               = var.create_resource_group ? 1 : 0
   name                = "${var.prefix}-law"
   location            = local.resource_group_location
   resource_group_name = local.resource_group_name
   sku                 = "PerGB2018"
   retention_in_days   = 30
+}
+
+data "azurerm_log_analytics_workspace" "law" {
+  count               = var.create_resource_group ? 0 : 1
+  name                = "${var.prefix}-law"
+  resource_group_name = local.resource_group_name
 }
 
 resource "azurerm_kubernetes_cluster" "aks" {
@@ -50,7 +68,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   oms_agent {
-    log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+    log_analytics_workspace_id = local.law_id
   }
 
   network_profile {
@@ -59,9 +77,3 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 }
 
-resource "azurerm_role_assignment" "aks_acr_pull" {
-  principal_id                     = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
-  role_definition_name             = "AcrPull"
-  scope                            = azurerm_container_registry.acr.id
-  skip_service_principal_aad_check = true
-}

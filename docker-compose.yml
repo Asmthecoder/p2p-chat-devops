@@ -1,19 +1,81 @@
 version: '3.9'
+
+# Multi-peer demo setup: 3 independent P2P nodes.
+#
+# Usage:
+#   docker compose up --build
+#
+# Peer UIs:
+#   http://localhost:17001  →  Peer1
+#   http://localhost:17002  →  Peer2
+#   http://localhost:17003  →  Peer3
+#
+# Note: UDP LAN broadcast (port 9999) is restricted to the Docker bridge
+# subnet and won't cross between containers by default. Use the "+ Add Peer"
+# button in the UI and connect manually by container name or IP:
+#   Peer1 → add peer2:9002
+#   Peer2 → add peer1:9001, peer3:9003
+#
+# All three containers share the same p2p-net bridge, so TCP connections work.
+
+networks:
+  p2p-net:
+    driver: bridge
+
 services:
-  p2p-chat:
+  peer1:
     build: .
-    container_name: p2p-chat
+    container_name: p2p-peer1
     restart: unless-stopped
     ports:
-      - "17001:17001"
-      - "9001:9001"
-      - "9999:9999/udp"
+      - "17001:17001"   # Web UI
+      - "9001:9001"     # TCP P2P
     environment:
       - UI_HOST=0.0.0.0
       - UI_PORT=17001
+    networks:
+      - p2p-net
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:17001', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
-    command: ["python", "main.py", "--port", "9001", "--username", "ComposePeer"]
+    command: ["python", "main.py", "--port", "9001", "--ui-port", "17001", "--username", "Peer1"]
+
+  peer2:
+    build: .
+    container_name: p2p-peer2
+    restart: unless-stopped
+    ports:
+      - "17002:17002"
+      - "9002:9002"
+    environment:
+      - UI_HOST=0.0.0.0
+      - UI_PORT=17002
+    networks:
+      - p2p-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:17002', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command: ["python", "main.py", "--port", "9002", "--ui-port", "17002", "--username", "Peer2"]
+
+  peer3:
+    build: .
+    container_name: p2p-peer3
+    restart: unless-stopped
+    ports:
+      - "17003:17003"
+      - "9003:9003"
+    environment:
+      - UI_HOST=0.0.0.0
+      - UI_PORT=17003
+    networks:
+      - p2p-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:17003', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command: ["python", "main.py", "--port", "9003", "--ui-port", "17003", "--username", "Peer3"]

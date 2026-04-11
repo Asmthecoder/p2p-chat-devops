@@ -35,6 +35,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    env:
+      ACR_NAME: ${{ secrets.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
     permissions:
       contents: read
       id-token: write
@@ -48,7 +51,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Login to ACR
-        run: az acr login --name ${{ secrets.ACR_NAME }}
+        run: az acr login --name "$ACR_NAME"
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -56,13 +59,18 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.ACR_LOGIN_SERVER }}/p2p-chat:${{ github.sha }}
-            ${{ secrets.ACR_LOGIN_SERVER }}/p2p-chat:latest
+            ${{ env.ACR_LOGIN_SERVER }}/p2p-chat:${{ github.sha }}
+            ${{ env.ACR_LOGIN_SERVER }}/p2p-chat:latest
 
   deploy-aks:
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    env:
+      AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+      AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
+      ACR_NAME: ${{ secrets.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,12 +83,12 @@ jobs:
       - name: Set AKS context
         uses: azure/aks-set-context@v4
         with:
-          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
-          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
 
       - name: Deploy manifests
         run: |
-          IMAGE_URI="${{ secrets.ACR_LOGIN_SERVER }}/p2p-chat:${{ github.sha }}"
+          IMAGE_URI="$ACR_LOGIN_SERVER/p2p-chat:${{ github.sha }}"
           sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml > /tmp/deployment.yaml
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/configmap.yaml
