@@ -7,7 +7,13 @@ variable "prefix" {
 variable "location" {
   description = "Azure region"
   type        = string
-  default     = "Central India"
+  default     = "centralindia"
+}
+
+variable "create_resource_group" {
+  description = "Create the resource group in Terraform. Set false to use an existing group."
+  type        = bool
+  default     = true
 }
 
 variable "kubernetes_version" {

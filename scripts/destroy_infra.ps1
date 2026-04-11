@@ -1,7 +1,7 @@
 param(
     [string]$TfDir = "infra/terraform",
     [string]$Prefix = "p2pchat",
-    [string]$Location = "Central India",
+    [string]$Location = "centralindia",
     [string]$KubernetesVersion = "1.34.4",
     [switch]$AutoApprove
 )

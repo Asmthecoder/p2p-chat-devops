@@ -17,6 +17,7 @@ Fault Tolerance
 import asyncio
 import json
 import logging
+import re
 import socket
 import struct
 import time
@@ -40,6 +41,8 @@ MSG_LENGTH_PREFIX   = 4
 
 # Debounce: don't emit a system event for the same peer within this window
 SYSTEM_MSG_DEBOUNCE = 10     # seconds
+MAX_USERNAME_LENGTH = 32
+SAFE_USERNAME_REGEX = re.compile(r"[^A-Za-z0-9_. -]")
 
 
 async def _send_message(writer: asyncio.StreamWriter, data: dict):
@@ -67,6 +70,40 @@ def _peer_id(host: str, port: int) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _sanitize_username(name: str) -> str:
+    cleaned = SAFE_USERNAME_REGEX.sub("", (name or "").strip())
+    if not cleaned:
+        return "Unknown"
+    return cleaned[:MAX_USERNAME_LENGTH]
+
+
+def _canonical_auth_payload(msg: dict) -> str:
+    payload = {
+        "type": msg.get("type", ""),
+        "sender": msg.get("sender", ""),
+        "peer_id": msg.get("peer_id", ""),
+        "content": msg.get("content", ""),
+        "timestamp": msg.get("timestamp", ""),
+        "meta_port": msg.get("meta_port", ""),
+        "message_id": msg.get("message_id", ""),
+        "is_broadcast": int(bool(msg.get("is_broadcast", 0))),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _attach_auth_tag(crypto: EncryptionService, msg: dict) -> dict:
+    tagged = dict(msg)
+    canonical = _canonical_auth_payload(tagged)
+    tagged["auth_tag"] = crypto.sign_payload(canonical)
+    return tagged
+
+
+def _verify_auth_tag(crypto: EncryptionService, msg: dict) -> bool:
+    canonical = _canonical_auth_payload(msg)
+    signature = msg.get("auth_tag", "")
+    return crypto.verify_payload(canonical, signature)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -137,6 +174,7 @@ class DiscoveryService:
             port = int(port_str)
         except ValueError:
             return
+        username = _sanitize_username(username)
         if port == self.tcp_port and sender_host in ("127.0.0.1", self._local_ip()):
             return
         self._on_discovered(sender_host, port, username)
@@ -167,7 +205,7 @@ class PeerManager:
     """
 
     def __init__(self, username, host, port, store: MessageStore, crypto: EncryptionService):
-        self.username = username
+        self.username = _sanitize_username(username)
         self.host     = host
         self.port     = port
         self.store    = store
@@ -236,6 +274,7 @@ class PeerManager:
             "timestamp":    ts,
             "is_broadcast": int(is_broadcast),
         }
+        msg = _attach_auth_tag(self.crypto, msg)
         
         # Use lock to safely access _writers dictionary
         async with self._lock:
@@ -278,6 +317,7 @@ class PeerManager:
             "content":   "",
             "timestamp": _now_iso(),
         }
+        msg = _attach_auth_tag(self.crypto, msg)
         async with self._lock:
             targets = list(self._writers.keys()) if target_peer_id is None else [target_peer_id]
             writers_snapshot = {pid: self._writers.get(pid) for pid in targets if pid in self._writers}
@@ -294,7 +334,7 @@ class PeerManager:
         if pid in self._writers:
             logger.debug("Already connected to %s", pid)
             return
-        await self._connect_with_backoff(host, port, username)
+        await self._connect_with_backoff(host, port, _sanitize_username(username))
 
     async def get_connected_peers(self) -> list:
         return [
@@ -314,7 +354,7 @@ class PeerManager:
     def _schedule_connect(self, host: str, port: int, username: str):
         pid = _peer_id(host, port)
         if pid not in self._writers:
-            self._spawn(self._connect_with_backoff(host, port, username))
+            self._spawn(self._connect_with_backoff(host, port, _sanitize_username(username)))
 
     async def _connect_with_backoff(self, host: str, port: int, username: str):
         pid   = _peer_id(host, port)
@@ -338,9 +378,13 @@ class PeerManager:
         if not msg:
             writer.close()
             return
+        if not _verify_auth_tag(self.crypto, msg):
+            logger.warning("Rejected unauthenticated initial frame from %s", addr)
+            writer.close()
+            return
         host     = addr[0]
         port     = msg.get("meta_port", addr[1])
-        username = msg.get("sender", "Unknown")
+        username = _sanitize_username(msg.get("sender", "Unknown"))
         pid      = _peer_id(host, port)
         await self._on_peer_connected(pid, host, port, username, reader, writer)
 
@@ -367,6 +411,7 @@ class PeerManager:
             "content":   "JOINED",
             "timestamp": _now_iso(),
         }
+        handshake = _attach_auth_tag(self.crypto, handshake)
         try:
             await _send_message(writer, handshake)
         except Exception:
@@ -397,6 +442,10 @@ class PeerManager:
 
     async def _dispatch(self, pid: str, msg: dict):
         try:
+            if not _verify_auth_tag(self.crypto, msg):
+                logger.warning("Rejected unauthenticated frame from %s", pid)
+                return
+
             msg_type = msg.get("type", "")
 
             if msg_type == "HEARTBEAT":
@@ -446,7 +495,7 @@ class PeerManager:
                 if content == "JOINED":
                     async with self._lock:
                         if pid in self._peers:
-                            self._peers[pid]["username"]  = msg.get("sender", "Unknown")
+                            self._peers[pid]["username"]  = _sanitize_username(msg.get("sender", "Unknown"))
                             self._peers[pid]["meta_port"] = msg.get("meta_port", self._peers[pid]["port"])
                 else:
                     msg["peer_id"] = pid
@@ -507,6 +556,7 @@ class PeerManager:
                 "content":   "",
                 "timestamp": _now_iso(),
             }
+            hb_msg = _attach_auth_tag(self.crypto, hb_msg)
             async with self._lock:
                 pids = list(self._writers.keys())
 

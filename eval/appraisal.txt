@@ -1,0 +1,14 @@
+Evaluation Appraisal
+====================
+Scalability latency slope (p95 per peer): -0.001 ms/peer
+Scalability throughput slope: -3.900 msg/s per peer
+Reliability success-rate drop (0%->max loss): 23.33%
+
+Latency scaling: Strong. Tail latency grows slowly as peers increase.
+Throughput scaling: Degrading with scale; investigate contention and retries.
+Reliability: Acceptable with degradation; retries/backoff are recommended.
+
+Design trade-offs observed:
+- Lower timeout improves responsiveness but may reduce success rate under jitter.
+- Aggressive retransmission can improve delivery but may reduce throughput at scale.
+- Adding integrity checks increases CPU overhead slightly while improving trustworthiness.

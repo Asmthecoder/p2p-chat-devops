@@ -1,17 +1,20 @@
 param(
     [string]$TfDir = "infra/terraform",
     [string]$Prefix = "p2pchat",
-    [string]$Location = "Central India",
+    [string]$Location = "centralindia",
     [string]$KubernetesVersion = "1.34.4",
+    [switch]$UseExistingResourceGroup,
     [switch]$AutoApprove
 )
+
+$CreateResourceGroup = if ($UseExistingResourceGroup) { "false" } else { "true" }
 
 Push-Location $TfDir
 try {
     terraform init
     terraform fmt -recursive
     terraform validate
-    terraform plan -out tfplan -var "prefix=$Prefix" -var "location=$Location" -var "kubernetes_version=$KubernetesVersion"
+    terraform plan -out tfplan -var "prefix=$Prefix" -var "location=$Location" -var "kubernetes_version=$KubernetesVersion" -var "create_resource_group=$CreateResourceGroup"
 
     if ($AutoApprove) {
         terraform apply -auto-approve tfplan

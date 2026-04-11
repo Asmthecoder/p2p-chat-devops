@@ -10,11 +10,15 @@ on:
       location:
         description: Azure location
         required: true
-        default: Central India
+        default: centralindia
       kubernetes_version:
         description: AKS Kubernetes version
         required: true
         default: "1.34.4"
+      create_resource_group:
+        description: Create resource group (set false if RG already exists)
+        required: true
+        default: "true"
 
 jobs:
   terraform-apply:
@@ -41,7 +45,8 @@ jobs:
           terraform apply -auto-approve \
             -var="prefix=${{ github.event.inputs.prefix }}" \
             -var="location=${{ github.event.inputs.location }}" \
-            -var="kubernetes_version=${{ github.event.inputs.kubernetes_version }}"
+            -var="kubernetes_version=${{ github.event.inputs.kubernetes_version }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
 
       - name: Capture AKS outputs
         working-directory: infra/terraform

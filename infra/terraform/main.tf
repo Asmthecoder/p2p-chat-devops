@@ -1,28 +1,39 @@
 resource "azurerm_resource_group" "rg" {
+  count    = var.create_resource_group ? 1 : 0
   name     = "${var.prefix}-rg"
   location = var.location
 }
 
+data "azurerm_resource_group" "existing_rg" {
+  count = var.create_resource_group ? 0 : 1
+  name  = "${var.prefix}-rg"
+}
+
+locals {
+  resource_group_name     = var.create_resource_group ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.existing_rg[0].name
+  resource_group_location = var.create_resource_group ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.existing_rg[0].location
+}
+
 resource "azurerm_container_registry" "acr" {
   name                = replace("${var.prefix}acr", "-", "")
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = local.resource_group_name
+  location            = local.resource_group_location
   sku                 = "Basic"
   admin_enabled       = false
 }
 
 resource "azurerm_log_analytics_workspace" "law" {
   name                = "${var.prefix}-law"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.resource_group_location
+  resource_group_name = local.resource_group_name
   sku                 = "PerGB2018"
   retention_in_days   = 30
 }
 
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = "${var.prefix}-aks"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.resource_group_location
+  resource_group_name = local.resource_group_name
   dns_prefix          = "${var.prefix}-dns"
   kubernetes_version  = var.kubernetes_version
   sku_tier            = "Free"
@@ -43,7 +54,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   network_profile {
-    network_plugin = "azure"
+    network_plugin    = "azure"
     load_balancer_sku = "standard"
   }
 }

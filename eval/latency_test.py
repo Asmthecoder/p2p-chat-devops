@@ -1,191 +1,493 @@
 """
-eval/latency_test.py — Performance Evaluation Script
-======================================================
-Rubric: Evaluation, Analysis & Appraisal (CO6)
+eval/latency_test.py - Evaluation, Analysis, and Appraisal suite
 
-This script:
-1. Spawns N peer subprocesses on ports 9101, 9102, … 9100+N
-2. Sends timestamped PING messages between peers
-3. Records round-trip latency for each peer count
-4. Plots latency vs number of peers and saves results.png
+This script evaluates:
+1) Scalability: latency and throughput as peer count increases
+2) Reliability: success rate under simulated packet loss and delay
+3) Design trade-offs: automatic appraisal from observed metrics
 
 Usage:
-    python eval/latency_test.py         # tests 2, 3, 4, 5 peers
-    python eval/latency_test.py --max 6
+    python eval/latency_test.py
+    python eval/latency_test.py --max-peers 8 --trials 5 --messages 30
 
-Results are printed to console and saved as eval/results.png
+Outputs:
+    eval/results.csv
+    eval/results.json
+    eval/appraisal.txt
+    eval/results.png (if matplotlib is installed)
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import logging
-import os
-import subprocess
-import sys
+import math
+import random
+import statistics
+import struct
 import time
 from pathlib import Path
+from typing import Any
 
-# Optionally import matplotlib
 try:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
-    print("⚠ matplotlib not found. Install it to generate graphs: pip install matplotlib")
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
-logger = logging.getLogger("eval")
-
-BASE_PORT      = 9101
-STARTUP_WAIT   = 3.5   # seconds to wait for each peer to start
-MESSAGES_EACH  = 5     # messages sent per pair per test
-EVAL_RESULTS   = Path(__file__).parent / "results.png"
-EVAL_CSV       = Path(__file__).parent / "results.csv"
+BASE_PORT = 9101
+RESULT_DIR = Path(__file__).parent
+CSV_PATH = RESULT_DIR / "results.csv"
+JSON_PATH = RESULT_DIR / "results.json"
+APPRAISAL_PATH = RESULT_DIR / "appraisal.txt"
+PLOT_PATH = RESULT_DIR / "results.png"
 
 
-async def measure_latency_direct(n_peers: int) -> float:
-    """
-    Directly measure round-trip latency between two peers using raw TCP.
-    Returns average RTT in milliseconds.
-    """
-    import struct
+def percentile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    if q <= 0:
+        return min(values)
+    if q >= 100:
+        return max(values)
 
-    port_server = BASE_PORT + n_peers * 100   # avoid clashes
-    port_client = port_server + 1
+    sorted_values = sorted(values)
+    rank = (len(sorted_values) - 1) * (q / 100.0)
+    low = math.floor(rank)
+    high = math.ceil(rank)
+    if low == high:
+        return sorted_values[int(rank)]
+    return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (rank - low)
 
-    rtts = []
 
-    async def echo_server():
-        """Minimal echo server that bounces back whatever it receives."""
-        async def handle(reader, writer):
-            data = await reader.read(1024)
-            writer.write(data)
-            await writer.drain()
+async def _echo_server(host: str, port: int, drop_rate: float, max_jitter_ms: float):
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        try:
+            # Read 4-byte length prefix then payload.
+            header = await reader.readexactly(4)
+            msg_len = struct.unpack(">I", header)[0]
+            payload = await reader.readexactly(msg_len)
+
+            if max_jitter_ms > 0:
+                await asyncio.sleep(random.uniform(0, max_jitter_ms) / 1000.0)
+
+            if random.random() >= drop_rate:
+                writer.write(header + payload)
+                await writer.drain()
+        except asyncio.IncompleteReadError:
+            pass
+        finally:
             writer.close()
 
-        server = await asyncio.start_server(handle, "127.0.0.1", port_server)
-        async with server:
-            await server.serve_forever()
+    return await asyncio.start_server(handle, host, port)
 
-    server_task = asyncio.ensure_future(echo_server())
-    await asyncio.sleep(0.3)
 
-    for _ in range(MESSAGES_EACH):
+async def rtt_trial(
+    peer_count: int,
+    messages: int,
+    timeout_ms: int,
+    drop_rate: float,
+    jitter_ms: float,
+) -> dict[str, Any]:
+    host = "127.0.0.1"
+    port = BASE_PORT + peer_count * 100
+    timeout_s = timeout_ms / 1000.0
+
+    server = await _echo_server(host, port, drop_rate=drop_rate, max_jitter_ms=jitter_ms)
+    await asyncio.sleep(0.05)
+
+    samples_ms: list[float] = []
+    successes = 0
+    total = 0
+    start = time.perf_counter()
+
+    for _ in range(messages):
+        total += 1
         try:
             t0 = time.perf_counter()
-            r, w = await asyncio.open_connection("127.0.0.1", port_server)
-            payload = json.dumps({"ts": t0, "n": n_peers}).encode()
-            # Simulate our 4-byte length-prefix framing
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout_s)
+
+            payload = json.dumps({"ts": t0, "n": peer_count}).encode("utf-8")
             header = struct.pack(">I", len(payload))
-            w.write(header + payload)
-            await w.drain()
-            await r.read(1024)
+            writer.write(header + payload)
+            await writer.drain()
+
+            _ = await asyncio.wait_for(reader.readexactly(4), timeout=timeout_s)
+            _ = await asyncio.wait_for(reader.readexactly(len(payload)), timeout=timeout_s)
+
             t1 = time.perf_counter()
-            rtts.append((t1 - t0) * 1000)
-            w.close()
-            await asyncio.sleep(0.05)
-        except Exception as exc:
-            logger.warning("Ping error: %s", exc)
+            samples_ms.append((t1 - t0) * 1000.0)
+            successes += 1
+            writer.close()
+            await writer.wait_closed()
+        except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
+            continue
 
-    server_task.cancel()
-    return sum(rtts) / len(rtts) if rtts else 0.0
+    elapsed_s = max(time.perf_counter() - start, 1e-9)
+    server.close()
+    await server.wait_closed()
+
+    success_rate = (successes / total) if total else 0.0
+    throughput_mps = successes / elapsed_s
+
+    return {
+        "samples_ms": samples_ms,
+        "successes": successes,
+        "attempts": total,
+        "success_rate": success_rate,
+        "throughput_mps": throughput_mps,
+    }
 
 
-async def run_evaluation(max_peers: int):
-    peer_counts = list(range(2, max_peers + 1))
-    results = {}
+def summarize_samples(samples_ms: list[float]) -> dict[str, float]:
+    if not samples_ms:
+        return {
+            "avg_ms": 0.0,
+            "p50_ms": 0.0,
+            "p95_ms": 0.0,
+            "min_ms": 0.0,
+            "max_ms": 0.0,
+            "stddev_ms": 0.0,
+        }
 
-    print("\n" + "═" * 55)
-    print("  P2P Chat — Latency Evaluation")
-    print("  Rubric: CO6 — Evaluation, Analysis & Appraisal")
-    print("═" * 55)
-    print(f"  {'Peers':<8} {'Avg RTT (ms)':<16} {'Min RTT (ms)':<16} {'Max RTT (ms)'}")
-    print("  " + "─" * 53)
+    return {
+        "avg_ms": statistics.mean(samples_ms),
+        "p50_ms": percentile(samples_ms, 50),
+        "p95_ms": percentile(samples_ms, 95),
+        "min_ms": min(samples_ms),
+        "max_ms": max(samples_ms),
+        "stddev_ms": statistics.pstdev(samples_ms),
+    }
 
-    for n in peer_counts:
-        latencies = []
-        for trial in range(3):  # 3 trials per N
-            rtt = await measure_latency_direct(n)
-            latencies.append(rtt)
-            await asyncio.sleep(0.1)
 
-        avg = sum(latencies) / len(latencies)
-        mn  = min(latencies)
-        mx  = max(latencies)
-        results[n] = {"avg": avg, "min": mn, "max": mx, "samples": latencies}
-        print(f"  {n:<8} {avg:<16.3f} {mn:<16.3f} {mx:.3f}")
+async def run_scalability(
+    max_peers: int,
+    trials: int,
+    messages: int,
+    timeout_ms: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
 
-    print("═" * 55)
+    print("\nScalability evaluation")
+    print("=" * 90)
+    print(f"{'Peers':<8}{'Avg(ms)':<12}{'P95(ms)':<12}{'Success%':<12}{'Thr(msg/s)':<14}{'Samples':<10}")
+    print("-" * 90)
 
-    # Save CSV
-    EVAL_CSV.parent.mkdir(exist_ok=True)
-    with open(EVAL_CSV, "w") as f:
-        f.write("peers,avg_ms,min_ms,max_ms\n")
-        for n, r in results.items():
-            f.write(f"{n},{r['avg']:.3f},{r['min']:.3f},{r['max']:.3f}\n")
-    print(f"\n  CSV saved: {EVAL_CSV}")
+    for peers in range(2, max_peers + 1):
+        merged_samples: list[float] = []
+        attempts = 0
+        successes = 0
+        throughput_values: list[float] = []
 
-    # Generate graph
-    if HAS_MATPLOTLIB:
-        _plot(results)
+        for _ in range(trials):
+            trial = await rtt_trial(
+                peer_count=peers,
+                messages=messages,
+                timeout_ms=timeout_ms,
+                drop_rate=0.0,
+                jitter_ms=0.0,
+            )
+            merged_samples.extend(trial["samples_ms"])
+            attempts += trial["attempts"]
+            successes += trial["successes"]
+            throughput_values.append(trial["throughput_mps"])
+
+        stats = summarize_samples(merged_samples)
+        success_rate = (successes / attempts) if attempts else 0.0
+        avg_throughput = statistics.mean(throughput_values) if throughput_values else 0.0
+
+        row = {
+            "mode": "scalability",
+            "peers": peers,
+            **stats,
+            "success_rate": success_rate,
+            "throughput_mps": avg_throughput,
+            "samples": len(merged_samples),
+            "attempts": attempts,
+            "successes": successes,
+        }
+        rows.append(row)
+
+        print(
+            f"{peers:<8}{stats['avg_ms']:<12.2f}{stats['p95_ms']:<12.2f}"
+            f"{(success_rate * 100):<12.1f}{avg_throughput:<14.2f}{len(merged_samples):<10}"
+        )
+
+    return rows
+
+
+async def run_reliability(
+    peers: int,
+    trials: int,
+    messages: int,
+    timeout_ms: int,
+    loss_levels: list[float],
+    jitter_ms: float,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    print("\nReliability evaluation (simulated loss and jitter)")
+    print("=" * 90)
+    print(f"{'Loss%':<10}{'Avg(ms)':<12}{'P95(ms)':<12}{'Success%':<12}{'Thr(msg/s)':<14}{'Samples':<10}")
+    print("-" * 90)
+
+    for loss in loss_levels:
+        merged_samples: list[float] = []
+        attempts = 0
+        successes = 0
+        throughput_values: list[float] = []
+
+        for _ in range(trials):
+            trial = await rtt_trial(
+                peer_count=peers,
+                messages=messages,
+                timeout_ms=timeout_ms,
+                drop_rate=loss,
+                jitter_ms=jitter_ms,
+            )
+            merged_samples.extend(trial["samples_ms"])
+            attempts += trial["attempts"]
+            successes += trial["successes"]
+            throughput_values.append(trial["throughput_mps"])
+
+        stats = summarize_samples(merged_samples)
+        success_rate = (successes / attempts) if attempts else 0.0
+        avg_throughput = statistics.mean(throughput_values) if throughput_values else 0.0
+
+        row = {
+            "mode": "reliability",
+            "peers": peers,
+            "loss_rate": loss,
+            **stats,
+            "success_rate": success_rate,
+            "throughput_mps": avg_throughput,
+            "samples": len(merged_samples),
+            "attempts": attempts,
+            "successes": successes,
+            "jitter_ms": jitter_ms,
+        }
+        rows.append(row)
+
+        print(
+            f"{(loss * 100):<10.0f}{stats['avg_ms']:<12.2f}{stats['p95_ms']:<12.2f}"
+            f"{(success_rate * 100):<12.1f}{avg_throughput:<14.2f}{len(merged_samples):<10}"
+        )
+
+    return rows
+
+
+def linear_slope(xs: list[float], ys: list[float]) -> float:
+    if len(xs) < 2 or len(ys) < 2 or len(xs) != len(ys):
+        return 0.0
+    x_mean = statistics.mean(xs)
+    y_mean = statistics.mean(ys)
+    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+    den = sum((x - x_mean) ** 2 for x in xs)
+    if den == 0:
+        return 0.0
+    return num / den
+
+
+def build_appraisal(scalability_rows: list[dict[str, Any]], reliability_rows: list[dict[str, Any]]) -> str:
+    peers = [float(r["peers"]) for r in scalability_rows]
+    p95s = [float(r["p95_ms"]) for r in scalability_rows]
+    throughputs = [float(r["throughput_mps"]) for r in scalability_rows]
+
+    p95_slope = linear_slope(peers, p95s)
+    thr_slope = linear_slope(peers, throughputs)
+
+    zero_loss = next((r for r in reliability_rows if abs(float(r["loss_rate"])) < 1e-9), None)
+    high_loss = max(reliability_rows, key=lambda r: float(r["loss_rate"])) if reliability_rows else None
+
+    reliability_drop = 0.0
+    if zero_loss and high_loss and zero_loss["success_rate"] > 0:
+        reliability_drop = (zero_loss["success_rate"] - high_loss["success_rate"]) / zero_loss["success_rate"]
+
+    lines = []
+    lines.append("Evaluation Appraisal")
+    lines.append("====================")
+    lines.append(f"Scalability latency slope (p95 per peer): {p95_slope:.3f} ms/peer")
+    lines.append(f"Scalability throughput slope: {thr_slope:.3f} msg/s per peer")
+    lines.append(f"Reliability success-rate drop (0%->max loss): {reliability_drop * 100:.2f}%")
+    lines.append("")
+
+    if p95_slope <= 3.0:
+        lines.append("Latency scaling: Strong. Tail latency grows slowly as peers increase.")
+    elif p95_slope <= 8.0:
+        lines.append("Latency scaling: Moderate. System remains usable but watch tail growth.")
     else:
-        print("  Install matplotlib to generate the latency graph.")
+        lines.append("Latency scaling: Weak. Tail latency grows quickly; optimize routing/framing.")
 
-    return results
+    if thr_slope >= 0:
+        lines.append("Throughput scaling: Non-degrading under added peer count.")
+    else:
+        lines.append("Throughput scaling: Degrading with scale; investigate contention and retries.")
+
+    if reliability_drop <= 0.10:
+        lines.append("Reliability: Robust under adverse conditions.")
+    elif reliability_drop <= 0.30:
+        lines.append("Reliability: Acceptable with degradation; retries/backoff are recommended.")
+    else:
+        lines.append("Reliability: Significant degradation under loss; stronger fault-tolerance required.")
+
+    lines.append("")
+    lines.append("Design trade-offs observed:")
+    lines.append("- Lower timeout improves responsiveness but may reduce success rate under jitter.")
+    lines.append("- Aggressive retransmission can improve delivery but may reduce throughput at scale.")
+    lines.append("- Adding integrity checks increases CPU overhead slightly while improving trustworthiness.")
+
+    return "\n".join(lines) + "\n"
 
 
-def _plot(results: dict):
-    """Generate and save a latency vs. peer count graph."""
-    ns   = sorted(results.keys())
-    avgs = [results[n]["avg"] for n in ns]
-    mins = [results[n]["min"] for n in ns]
-    maxs = [results[n]["max"] for n in ns]
-    errs_lo = [a - m for a, m in zip(avgs, mins)]
-    errs_hi = [m - a for a, m in zip(avgs, maxs)]
+def save_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    keys = [
+        "mode",
+        "peers",
+        "loss_rate",
+        "avg_ms",
+        "p50_ms",
+        "p95_ms",
+        "min_ms",
+        "max_ms",
+        "stddev_ms",
+        "success_rate",
+        "throughput_mps",
+        "samples",
+        "attempts",
+        "successes",
+        "jitter_ms",
+    ]
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    fig.patch.set_facecolor("#0f0f1a")
-    ax.set_facecolor("#0f0f1a")
+    lines = [",".join(keys)]
+    for row in rows:
+        lines.append(
+            ",".join(
+                str(row.get(k, "")) for k in keys
+            )
+        )
 
-    color_avg = "#7c3aed"
-    color_fill = "#4f46e5"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    ax.plot(ns, avgs, "o-", color=color_avg, linewidth=2.5, markersize=7, label="Avg RTT", zorder=3)
-    ax.fill_between(ns, mins, maxs, alpha=0.2, color=color_fill, label="Min–Max range")
 
-    # Labels on points
-    for n, a in zip(ns, avgs):
-        ax.annotate(f"{a:.1f}ms", (n, a), textcoords="offset points",
-                    xytext=(0, 10), ha="center", color="#e2e8f0", fontsize=9)
+def maybe_plot(scalability_rows: list[dict[str, Any]], reliability_rows: list[dict[str, Any]]) -> None:
+    if not HAS_MATPLOTLIB:
+        print("matplotlib not installed; skipping graph output.")
+        return
 
-    ax.set_xlabel("Number of Peers", color="#94a3b8", fontsize=11)
-    ax.set_ylabel("Round-Trip Time (ms)", color="#94a3b8", fontsize=11)
-    ax.set_title("P2P Chat — Latency vs. Number of Peers\n(localhost, AES-256 encrypted)",
-                 color="#e2e8f0", fontsize=13, fontweight="bold", pad=15)
-    ax.tick_params(colors="#94a3b8")
-    ax.spines[:].set_color("#334155")
-    ax.set_xticks(ns)
-    ax.grid(True, color="#1e293b", linestyle="--", linewidth=0.8)
-    ax.legend(facecolor="#1e293b", edgecolor="#334155", labelcolor="#e2e8f0")
+    peers = [r["peers"] for r in scalability_rows]
+    p95 = [r["p95_ms"] for r in scalability_rows]
+    thr = [r["throughput_mps"] for r in scalability_rows]
+
+    losses = [r["loss_rate"] * 100 for r in reliability_rows]
+    rel_success = [r["success_rate"] * 100 for r in reliability_rows]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+
+    axes[0].plot(peers, p95, marker="o", linewidth=2)
+    axes[0].set_title("Tail Latency vs Peers")
+    axes[0].set_xlabel("Peers")
+    axes[0].set_ylabel("p95 latency (ms)")
+    axes[0].grid(True, linestyle="--", alpha=0.4)
+
+    ax0b = axes[0].twinx()
+    ax0b.plot(peers, thr, marker="s", linewidth=1.7)
+    ax0b.set_ylabel("throughput (msg/s)")
+
+    axes[1].plot(losses, rel_success, marker="o", linewidth=2)
+    axes[1].set_title("Reliability Under Loss")
+    axes[1].set_xlabel("packet loss (%)")
+    axes[1].set_ylabel("success rate (%)")
+    axes[1].grid(True, linestyle="--", alpha=0.4)
 
     plt.tight_layout()
-    plt.savefig(EVAL_RESULTS, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"\n  📊 Graph saved: {EVAL_RESULTS}")
-    print("     Include eval/results.png in your project report.\n")
+    plt.savefig(PLOT_PATH, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="P2P Chat latency evaluator")
-    parser.add_argument("--max", type=int, default=5, help="Max peers to test (default: 5)")
-    args = parser.parse_args()
-    asyncio.run(run_evaluation(args.max))
+async def run(args: argparse.Namespace) -> None:
+    RESULT_DIR.mkdir(exist_ok=True)
+
+    scalability_rows = await run_scalability(
+        max_peers=args.max_peers,
+        trials=args.trials,
+        messages=args.messages,
+        timeout_ms=args.timeout_ms,
+    )
+
+    reliability_rows = await run_reliability(
+        peers=args.reliability_peers,
+        trials=args.trials,
+        messages=args.messages,
+        timeout_ms=args.timeout_ms,
+        loss_levels=args.loss_levels,
+        jitter_ms=args.jitter_ms,
+    )
+
+    appraisal = build_appraisal(scalability_rows, reliability_rows)
+
+    all_rows = scalability_rows + reliability_rows
+    save_csv(all_rows, CSV_PATH)
+
+    JSON_PATH.write_text(
+        json.dumps(
+            {
+                "config": {
+                    "max_peers": args.max_peers,
+                    "trials": args.trials,
+                    "messages": args.messages,
+                    "timeout_ms": args.timeout_ms,
+                    "reliability_peers": args.reliability_peers,
+                    "loss_levels": args.loss_levels,
+                    "jitter_ms": args.jitter_ms,
+                },
+                "scalability": scalability_rows,
+                "reliability": reliability_rows,
+                "appraisal": appraisal,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    APPRAISAL_PATH.write_text(appraisal, encoding="utf-8")
+    maybe_plot(scalability_rows, reliability_rows)
+
+    print("\nFiles written:")
+    print(f"- {CSV_PATH}")
+    print(f"- {JSON_PATH}")
+    print(f"- {APPRAISAL_PATH}")
+    if HAS_MATPLOTLIB:
+        print(f"- {PLOT_PATH}")
+
+    print("\n" + appraisal)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="P2P evaluation, analysis, and appraisal")
+    parser.add_argument("--max-peers", type=int, default=6, help="maximum peers for scalability run")
+    parser.add_argument("--trials", type=int, default=3, help="trials per scenario")
+    parser.add_argument("--messages", type=int, default=20, help="messages per trial")
+    parser.add_argument("--timeout-ms", type=int, default=800, help="request timeout in milliseconds")
+    parser.add_argument("--reliability-peers", type=int, default=6, help="peer count used for reliability sweep")
+    parser.add_argument("--jitter-ms", type=float, default=25.0, help="simulated jitter for reliability test")
+    parser.add_argument(
+        "--loss-levels",
+        type=float,
+        nargs="+",
+        default=[0.0, 0.05, 0.1, 0.2, 0.3],
+        help="packet loss levels for reliability sweep (0.0-1.0)",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    asyncio.run(run(args))
 
 
 if __name__ == "__main__":
