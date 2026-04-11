@@ -86,14 +86,29 @@ jobs:
           resource-group: ${{ env.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ env.AKS_CLUSTER_NAME }}
 
+      - name: Enable ACR admin account
+        run: |
+          az acr update \
+            --name ${{ secrets.ACR_NAME }} \
+            --admin-enabled true
+
       - name: Create ACR pull secret
         run: |
           kubectl create namespace p2p-chat --dry-run=client -o yaml | kubectl apply -f -
+
+          ACR_USERNAME=$(az acr credential show \
+            --name ${{ secrets.ACR_NAME }} \
+            --query username -o tsv)
+
+          ACR_PASSWORD=$(az acr credential show \
+            --name ${{ secrets.ACR_NAME }} \
+            --query "passwords[0].value" -o tsv)
+
           kubectl create secret docker-registry acr-secret \
             --namespace p2p-chat \
             --docker-server=${{ secrets.ACR_LOGIN_SERVER }} \
-            --docker-username=${{ secrets.ACR_NAME }} \
-            --docker-password=$(az acr credential show --name ${{ secrets.ACR_NAME }} --query "passwords[0].value" -o tsv) \
+            --docker-username="$ACR_USERNAME" \
+            --docker-password="$ACR_PASSWORD" \
             --docker-email=dummy@example.com \
             --dry-run=client -o yaml | kubectl apply -f -
 
