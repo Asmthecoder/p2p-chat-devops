@@ -86,16 +86,35 @@ jobs:
           resource-group: ${{ env.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ env.AKS_CLUSTER_NAME }}
 
+      - name: Create ACR pull secret
+        run: |
+          kubectl create namespace p2p-chat --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret docker-registry acr-secret \
+            --namespace p2p-chat \
+            --docker-server=${{ secrets.ACR_LOGIN_SERVER }} \
+            --docker-username=${{ secrets.ACR_NAME }} \
+            --docker-password=$(az acr credential show --name ${{ secrets.ACR_NAME }} --query "passwords[0].value" -o tsv) \
+            --docker-email=dummy@example.com \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy manifests
         run: |
-          IMAGE_URI="$ACR_LOGIN_SERVER/p2p-chat:${{ github.sha }}"
-          sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml > /tmp/deployment.yaml
+          sed -e "s|\${ACR_LOGIN_SERVER}|$ACR_LOGIN_SERVER|g" -e "s|\${GITHUB_SHA}|$GITHUB_SHA|g" k8s/deployment.yaml > /tmp/deployment.yaml
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/configmap.yaml
           kubectl apply -f /tmp/deployment.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/hpa.yaml
-          kubectl wait --for=condition=available deployment/p2p-chat -n p2p-chat --timeout=180s
+
+      - name: Debug Kubernetes rollout
+        run: |
+          kubectl get pods -n p2p-chat -o wide
+          kubectl describe deployment p2p-chat -n p2p-chat
+          kubectl describe pods -n p2p-chat
+          kubectl get events -n p2p-chat --sort-by=.metadata.creationTimestamp
+
+      - name: Wait for rollout
+        run: |
           kubectl rollout status deployment/p2p-chat -n p2p-chat --timeout=180s
           kubectl get pods -n p2p-chat -o wide
           kubectl get svc -n p2p-chat

@@ -13,9 +13,11 @@ spec:
       labels:
         app: p2p-chat
     spec:
+      imagePullSecrets:
+        - name: acr-secret
       containers:
         - name: p2p-chat
-          image: IMAGE_PLACEHOLDER
+          image: ${ACR_LOGIN_SERVER}/p2p-chat:${GITHUB_SHA}
           imagePullPolicy: Always
           ports:
             - containerPort: 17001
